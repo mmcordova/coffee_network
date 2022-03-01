@@ -2,10 +2,6 @@
 # coding: utf-8
 
 # # Loading libraries and defining helper functions
-
-# In[1]:
-
-
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -100,10 +96,6 @@ data.drop(data[data["Exporter"] == data["Importer"]].index, inplace=True)
 
 # # Filtering data
 
-# In[3]:
-
-
-
 # Define filter to apply to the DataFrame
 # 
 # Dictionary containing string conditions
@@ -127,20 +119,33 @@ data_filt = data.query(q)
 maxrows = 500
 data_filt = data_filt.sort_values('Weight (1000kg)', ascending=False).head(maxrows)
 
+# Select only biggest exporters and importers
+nexp = 10
+nodes_exp = data_filt.groupby("Exporter").aggregate(np.sum).sort_values("Weight (1000kg)", ascending=False).index[:nexp].tolist()
+nimp = 10
+nodes_imp = data_filt.groupby("Importer").aggregate(np.sum).sort_values("Weight (1000kg)", ascending=False).index[:nimp].tolist()
+excl = False
+if excl is True:
+	# Select only pairs both in biggest exporters AND biggest importers
+	data_filt = data_filt.loc[data_filt["Exporter"].isin(nodes_exp) & data_filt['Importer'].isin(nodes_imp), :]
+else:
+	# Select pairs where either the exporter OR the importer is among the biggest
+	data_filt = data_filt.loc[data_filt["Exporter"].isin(nodes_exp) | data_filt['Importer'].isin(nodes_imp), :]
+
+# Aggregate (sum) all kinds of coffees (roasted, not roasted, caffeinated, etc)
+data_filt = data_filt.groupby(['Exporter', "Importer"], as_index=False).aggregate(np.sum)
+
 # Remove empty columns
 data_filt = drop_nan_columns(data_filt)
 
 # Export to file
-data_filt.to_csv('data_filt.csv',sep=';',decimal=',')
+data_filt.to_csv('data_filt.csv')
 
 
 # # Defining the graph
 # We now have a dataset with the relationship exporter -> importer, where we applied some conditions to unencumber the graph (type of coffee, year, minimum weight, max number of lines).
 # 
 # Because of that relationship, the natural choice is a directed graph, which networkx provides.
-
-# In[4]:
-
 
 # Create empty graph
 G = nx.DiGraph()
@@ -149,10 +154,6 @@ G = nx.DiGraph()
 
 
 # First we have to define the graph nodes. As we have Importer and Exporter columns in our dataset, it's easy. We just need to ensure that no duplicate nodes exist (a country that imports and exports).
-
-# In[6]:
-
-
 imp = data_filt['Importer'].unique()
 exp = data_filt['Exporter'].unique()
 nodes = imp
@@ -168,7 +169,6 @@ nodes = np.unique(nodes)
 
 
 # Edges are the flows from each Exporter to each Importer
-# flow_countries = [(src, dest) for src in data_filt['Exporter'] for dest in data_filt['Importer']]
 pd_flow = pd.DataFrame(columns=['Exporter', 'Importer', 'Weight', 'Relative weight', 'coord_x', 'coord_y'])
 pd_flow['Exporter'] = data_filt['Exporter']
 pd_flow['Importer'] = data_filt['Importer']
@@ -185,21 +185,12 @@ G.add_weighted_edges_from(pd_flow[['Exporter', 'Importer', 'Weight']].values)
 # Until now our graph is an abstract concept. We (and networkx) have no idea of the position of each node. 
 # 
 # The simplest approach (at least for testing purposes) is to let networkx find the positions.
-
-# In[9]:
-
-
 pos = nx.spring_layout(G)
 
 
 
 
 # And now we can view the graph.
-
-# In[11]:
-
-
-#nx.draw(G)
 fig, ax = plt.subplots(figsize=(16, 12))
 nx.draw_networkx_nodes(G, pos, node_color="b", alpha=0.5, node_size=1)
 nx.draw_networkx_labels(G, pos, font_size=8)
@@ -210,11 +201,7 @@ nx.draw_networkx_edges(G, pos, alpha=0.3, edge_color="m")
 # Cool, we have a graph! But it's horrendous.
 # 
 # Fortunately, as our nodes are countries, we can use theirs coordinates. To do this, we need some dataset of each country. NaturalEarth has some really good datasets.
-
-# In[13]:
-
-
-path_gpd = 'ne_50m_admin_0_countries.zip'
+path_gpd = 'data/ne_50m_admin_0_countries.zip'
 gdf = gpd.read_file(path_gpd)
 # gdf = gdf.to_crs(epsg=3395) # mercator projection
 gdf = gdf.to_crs('+proj=robin') # robinson projection 
@@ -222,10 +209,6 @@ gdf = gdf[(gdf['SOVEREIGNT'] != "Antarctica")]
 
 
 # Let's recreate the graph just to make sure nothing is being inserted twice.
-
-# In[14]:
-
-
 G = nx.DiGraph()
 
 
@@ -234,9 +217,6 @@ G = nx.DiGraph()
 # Because now we have two datasets from two different sources (coffee data and countries data), we need first to guarantee some consistency between them. Let's select only those countries for which we have info in both datasets. 
 # 
 # And for those countries, let's find the centroid and use is as the position.
-
-# In[16]:
-
 
 # Check if all nodes are in the geopandas dataset
 coords = {}
@@ -256,10 +236,6 @@ if q != '':
 
 
 # Now we add the edges, their labels and position.
-
-# In[18]:
-
-
 # Add edges to the graph
 G.add_weighted_edges_from(pd_flow[['Exporter', 'Importer', 'Weight']].values)
 
@@ -281,9 +257,6 @@ label_edges = {(row['Exporter'],row['Importer']): f'{row["Weight"]:.1f}' for ind
 
 
 # # Visualization
-
-# In[20]:
-
 
 # Drawing
 fig, ax = plt.subplots(figsize=(16, 8))
@@ -308,21 +281,12 @@ fig.tight_layout()
 ax.axis('off')
 
 # Export figure
-fig.savefig('graph_coffee.pdf', dpi=200)
-
-
-
-# In[22]:
-
+fig.savefig('graph_coffee.png', dpi=200)
 
 adj = nx.adjacency_matrix(G)
 
 
 # For example, we can check, for each country, from how many other countries it imports coffee.
-
-# In[23]:
-
-
 print('Imports from how many countries')
 for i, n in enumerate(G.nodes):
 	n_imp = adj.getcol(i).count_nonzero()
@@ -331,10 +295,6 @@ print('')
 
 
 # And the opposite: to how many countries each country exports coffee.
-
-# In[24]:
-
-
 print('Exports to how many countries')
 for i, n in enumerate(G.nodes):
 	n_exp = adj.getrow(i).count_nonzero()
@@ -343,10 +303,6 @@ print('')
 
 
 # And finally we can try to visualize the adjacency matrix.
-
-# In[25]:
-
-
 fact_size = max(len(G.nodes)/40, 1)
 fig, ax = plt.subplots(figsize=(8*fact_size, 8*fact_size))
 ax.spy(adj)
@@ -363,7 +319,7 @@ ax.yaxis.set_ticklabels(G.nodes)
 ax.grid()
 
 fig.tight_layout()
-fig.savefig('spy_coffee.pdf', dpi=200)
+fig.savefig('spy_coffee.png', dpi=200)
 
 
 
@@ -406,4 +362,5 @@ S.to_csv('matrix_S_full.csv')
 big5 = data_filt.groupby("Exporter").aggregate(np.sum).sort_values("Weight (1000kg)", ascending=False).index[:5].tolist()
 for n in big5:
 	df = data_filt.loc[data_filt['Exporter'] == n, :].sort_values("Weight (1000kg)", ascending=False)
+
 	df.to_csv(f'biggest_importers_{n}.csv', sep=';', decimal=',')
